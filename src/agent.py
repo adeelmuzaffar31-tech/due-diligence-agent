@@ -1,18 +1,25 @@
 """The agent orchestrator — the brain that decides what to research.
 
-Uses Claude's native tool-use API in an agentic loop: the model plans
+Uses tool-use / function-calling in an agentic loop: the model plans
 research steps, calls tools, sees results, and continues until it has
 enough evidence to stop. Returns all collected research for synthesis.
+
+Works with both Claude (Anthropic) and GPT-4 (OpenAI) via the
+llm_provider abstraction. Switch providers via LLM_PROVIDER env var.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
-import anthropic
-
+from .llm_provider import (
+    append_assistant_message,
+    append_tool_results,
+    call_llm,
+    get_model_name,
+    get_provider,
+)
 from .tools import TOOL_DEFINITIONS, execute_tool
 
 
@@ -49,8 +56,8 @@ def run_research_agent(
     Returns:
         List of research findings, each {"tool": name, "input": dict, "result": dict}.
     """
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+    if verbose:
+        print(f"  [provider] {get_provider()} ({get_model_name()})")
 
     messages: list[dict[str, Any]] = [
         {
@@ -72,43 +79,35 @@ def run_research_agent(
         if verbose:
             print(f"  [iteration {iteration}] requesting next action from model...")
 
-        response = client.messages.create(
-            model=model,
-            max_tokens=4096,
+        response = call_llm(
             system=SYSTEM_PROMPT,
-            tools=TOOL_DEFINITIONS,
             messages=messages,
+            tools=TOOL_DEFINITIONS,
         )
 
-        messages.append({"role": "assistant", "content": response.content})
+        append_assistant_message(messages, response)
 
         if response.stop_reason == "end_turn":
             if verbose:
                 print(f"  [done] agent finished after {iteration} iterations")
             break
 
-        tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-        if not tool_use_blocks:
+        if not response.tool_calls:
             break
 
-        tool_results_for_model = []
-        for block in tool_use_blocks:
+        results: list[dict[str, Any]] = []
+        for call in response.tool_calls:
             if verbose:
-                print(f"  [tool] {block.name}({json.dumps(block.input)[:80]})")
-
-            result = execute_tool(block.name, block.input)
+                print(
+                    f"  [tool] {call.name}({json.dumps(call.arguments)[:80]})"
+                )
+            result = execute_tool(call.name, call.arguments)
             research_findings.append(
-                {"tool": block.name, "input": block.input, "result": result}
+                {"tool": call.name, "input": call.arguments, "result": result}
             )
-            tool_results_for_model.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": json.dumps(result)[:6000],  # cap to control context
-                }
-            )
+            results.append(result)
 
-        messages.append({"role": "user", "content": tool_results_for_model})
+        append_tool_results(messages, response.tool_calls, results)
 
     if verbose:
         print(f"  [collected] {len(research_findings)} pieces of evidence")

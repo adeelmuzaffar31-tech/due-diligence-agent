@@ -4,7 +4,9 @@ An AI agent that researches any company across multiple data sources and produce
 
 Give it a company name. It fans out to web search, news sources, and public filings, collects evidence, reasons about red flags, and generates a professional PDF report with risk scores, executive summary, and source citations. What takes a human analyst 3–4 hours, the agent completes in under 5 minutes.
 
-Built with Claude's tool-use API and a parallel research → single synthesis pass architecture.
+**Model-agnostic.** Built with a clean provider abstraction — runs on both **Claude (Anthropic)** and **GPT-4 (OpenAI)** with a single environment variable switch. Same agent loop, same tool definitions, same output schema.
+
+**Built with production discipline.** This isn't a notebook demo — it's structured the way a real backend service should be: clean module boundaries, validated I/O at every boundary (Pydantic), provider-agnostic LLM calls, capped context windows, and graceful tool error handling. Drawn from 3+ years building production Node.js APIs on AWS Lambda, API Gateway, and PostgreSQL.
 
 ---
 
@@ -17,7 +19,7 @@ Agent:
   → Searches news, press, lawsuits         [Tavily API]
   → Pulls public filings                   [SEC EDGAR]
   → Checks sanctions lists                 [OFAC]
-  → Reasons across all evidence            [Claude Sonnet]
+  → Reasons across all evidence            [Claude Sonnet OR GPT-4]
   → Generates structured report            [Pydantic schema]
   → Renders professional PDF               [WeasyPrint]
 
@@ -35,8 +37,8 @@ The agent uses a two-pass architecture: **research** then **synthesis**. The mod
 └─────────────────┬───────────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────────┐
-│  Orchestrator (Claude Sonnet + tool use)        │
-│  Plans research, calls tools in parallel        │
+│  Orchestrator (Claude tool-use OR GPT-4         │
+│  function-calling — unified via provider layer) │
 └──────┬──────────┬──────────┬──────────┬─────────┘
        ▼          ▼          ▼          ▼
    ┌───────┐ ┌───────┐  ┌───────┐  ┌───────┐
@@ -59,22 +61,36 @@ The agent uses a two-pass architecture: **research** then **synthesis**. The mod
 ## Quick start
 
 ```bash
-# Clone
 git clone https://github.com/adeelmuzaffar31-tech/due-diligence-agent.git
 cd due-diligence-agent
 
-# Install dependencies
 pip install -r requirements.txt
 
-# Configure API keys
 cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY and TAVILY_API_KEY
+# Edit .env: pick your provider, add your API key(s) and Tavily key
 
-# Run on a real company
+# Run with Claude (default)
 python -m src.main "Acme Technologies"
+
+# Run with GPT-4 instead — same agent, different model
+LLM_PROVIDER=openai python -m src.main "Acme Technologies"
 ```
 
 The PDF appears in `reports/acme_technologies_diligence.pdf`.
+
+## Switching between providers
+
+The agent works identically with either model. Set one environment variable:
+
+```bash
+# Use Claude (default)
+LLM_PROVIDER=anthropic
+
+# Use GPT-4
+LLM_PROVIDER=openai
+```
+
+You only need an API key for whichever provider you're using. Both providers expose tool-use (Anthropic) / function-calling (OpenAI), and the `llm_provider.py` module normalizes the differences so the rest of the codebase stays clean.
 
 ## What's in a report
 
@@ -92,35 +108,41 @@ Every report contains:
 - **Sources** — every URL the agent cited
 - **Confidence level** — how reliable the report is given available data
 
-See `examples/sample_report.pdf` for a real generated report.
-
 ## Tech stack
 
-- **LLM**: Claude Sonnet (Anthropic API) with native tool use
-- **Web search**: Tavily API (clean text extraction, not raw HTML)
-- **SEC filings**: EDGAR full-text search (free)
-- **Sanctions**: US Treasury OFAC API (free)
-- **PDF rendering**: WeasyPrint + Jinja2 templates
-- **Validation**: Pydantic for structured outputs
-- **Language**: Python 3.10+
+**AI layer**
+- LLMs: Claude Sonnet (Anthropic) or GPT-4 (OpenAI) — interchangeable via abstraction
+- Tool use / function calling for autonomous research
+- Pydantic schemas for validated structured output
+- Two-pass architecture: parallel research → synthesis
+
+**Backend layer**
+- Python 3.10+
+- Async HTTP with httpx
+- WeasyPrint + Jinja2 for professional PDF rendering
+- Modular design ready for FastAPI / Celery deployment
+
+**Data sources**
+- Tavily for web search (clean text extraction)
+- SEC EDGAR for public filings (free)
+- US Treasury OFAC for sanctions screening (free)
 
 ## Cost per report
 
-| Component | Cost |
-|---|---|
-| Claude API (research + synthesis) | $0.15 – $0.30 |
-| Tavily search calls (~5 per report) | $0.05 |
-| EDGAR, OFAC | Free |
-| **Total** | **~$0.20 – $0.35** |
-
-At 30:1 margins, this is a high-leverage project to build on top of.
+| Component | Claude Sonnet | GPT-4o |
+|---|---|---|
+| Research + synthesis | $0.15–$0.30 | $0.10–$0.25 |
+| Tavily search (~5 calls) | $0.05 | $0.05 |
+| EDGAR, OFAC | Free | Free |
+| **Total** | **~$0.20–$0.35** | **~$0.15–$0.30** |
 
 ## Project structure
 
 ```
 due-diligence-agent/
 ├── src/
-│   ├── agent.py          # Orchestrator loop with tool-use
+│   ├── llm_provider.py   # Provider abstraction (Claude + GPT)
+│   ├── agent.py          # Orchestrator loop
 │   ├── tools.py          # Web search, EDGAR, OFAC implementations
 │   ├── synthesizer.py    # Second-pass synthesis to structured JSON
 │   ├── pdf_generator.py  # PDF rendering with WeasyPrint
@@ -134,16 +156,25 @@ due-diligence-agent/
 
 ## Roadmap
 
-- [ ] Add Crunchbase / Proxycurl integration for startup intelligence
-- [ ] Court records search (CourtListener API)
-- [ ] LinkedIn team analysis
 - [ ] FastAPI wrapper for REST endpoint deployment
+- [ ] Docker container for one-command deployment
+- [ ] Token usage + cost tracking per run
+- [ ] Retry logic with exponential backoff for API failures
+- [ ] Caching layer for repeated company lookups
+- [ ] Add Crunchbase / Proxycurl for startup intelligence
+- [ ] Court records search (CourtListener API)
 - [ ] Webhook support for async report delivery
 
 ## License
 
 MIT — see [LICENSE](LICENSE)
 
-## About
+## About the author
 
-Built by [Adeel Muzaffar](https://www.linkedin.com/in/adeel-muzaffar-b61624172) — AI Agent Engineer specialising in autonomous agents that automate research and operations workflows. Available for projects.
+Built by [Adeel Muzaffar](https://www.linkedin.com/in/adeel-muzaffar-b61624172) — AI Agent Engineer with 3+ years building production backend systems.
+
+**Background**: Node.js / Express / NestJS APIs in production at Meissasoft, KYC state machine design on PostgreSQL, AWS Lambda + API Gateway + CloudFront at scale. Now specializing in AI agent architecture — applying that backend engineering discipline to autonomous systems.
+
+**Stack**: Claude API · OpenAI / GPT-4 · LangGraph · LangChain · Python · FastAPI · Node.js · Express · NestJS · PostgreSQL · MongoDB · AWS · RAG
+
+Available for remote projects — DM on LinkedIn.

@@ -1,19 +1,19 @@
 """Synthesizer — turns raw research evidence into a structured risk report.
 
 A separate LLM call from the research agent. Takes all gathered evidence and
-produces validated JSON via Pydantic schemas. This separation keeps the
-research agent focused and the synthesis pass cheap and deterministic.
+produces validated JSON via Pydantic schemas. Works with both Claude and GPT
+via the llm_provider abstraction.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-import anthropic
 from pydantic import BaseModel, Field, ValidationError
+
+from .llm_provider import call_llm
 
 
 # ============================================================
@@ -25,15 +25,15 @@ Confidence = Literal["LOW", "MEDIUM", "HIGH"]
 
 
 class SectionFinding(BaseModel):
-    score: int = Field(ge=1, le=10, description="Risk score for this section, 1=low risk, 10=critical")
-    findings: list[str] = Field(default_factory=list, description="Specific findings with sources")
+    score: int = Field(ge=1, le=10, description="Risk score, 1=low, 10=critical")
+    findings: list[str] = Field(default_factory=list)
 
 
 class DiligenceReport(BaseModel):
     company: str
     overall_risk_score: int = Field(ge=1, le=10)
     risk_level: RiskLevel
-    executive_summary: str = Field(description="2-3 sentence plain-English summary")
+    executive_summary: str
     red_flags: list[str] = Field(default_factory=list)
     sections: dict[str, SectionFinding]
     sources: list[str] = Field(default_factory=list)
@@ -66,12 +66,7 @@ Output ONLY valid JSON in this exact schema. No preamble, no markdown fences, no
 Scoring guide: 1-3 = low risk, 4-6 = moderate, 7-8 = high, 9-10 = critical.
 Risk level should align with overall_risk_score: 1-3=LOW, 4-5=MEDIUM, 6-8=HIGH, 9-10=CRITICAL.
 
-Confidence reflects how reliable your assessment is given the evidence available:
-- HIGH: comprehensive evidence across all sections
-- MEDIUM: some sections under-evidenced
-- LOW: limited or contradictory evidence
-
-If evidence is sparse for a section, give it a moderate score (5) and note the gap in findings.
+If evidence is sparse for a section, give it a moderate score (5) and note the gap.
 Cite specific URLs from the evidence in the sources list."""
 
 
@@ -79,19 +74,7 @@ def synthesize_report(
     company_name: str,
     research_findings: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Run the synthesis LLM call and return a validated report dict.
-
-    Args:
-        company_name: Subject of the report.
-        research_findings: Output from run_research_agent().
-
-    Returns:
-        Validated report as a dict, ready for PDF rendering.
-    """
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
-
-    # Build a compact evidence dump — JSON-encoded, capped for context
+    """Run the synthesis LLM call and return a validated report dict."""
     evidence_blob = json.dumps(research_findings, indent=2)[:40000]
 
     user_prompt = (
@@ -101,17 +84,13 @@ def synthesize_report(
         "Produce the structured JSON report now. JSON only."
     )
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=4096,
+    response = call_llm(
         system=SYNTHESIZER_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
+        tools=None,
     )
 
-    # Extract text from response
-    raw_text = "".join(
-        block.text for block in response.content if hasattr(block, "text")
-    ).strip()
+    raw_text = response.text.strip()
 
     # Strip markdown fences if the model included them despite instructions
     if raw_text.startswith("```"):
