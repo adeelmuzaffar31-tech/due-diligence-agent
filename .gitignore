@@ -217,4 +217,12 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-/reports
+# Local tool config
+.claude/
+
+# Generated reports (not tracked in version control)
+reports/
+
+# Environment files
+.env
+.env.local
