@@ -13,7 +13,8 @@
       "PowerShell(winget search *)",
       "PowerShell(\"GTK bin exists: $\\(Test-Path 'C:\\\\Program Files\\\\GTK3-Runtime Win64\\\\bin\\\\libgobject-2.0-0.dll'\\)\"; \"---persisted machine PATH contains GTK---\"; \\([Environment]::GetEnvironmentVariable\\('Path','Machine'\\)\\) -split ';' | Where-Object { $_ -match 'GTK' })",
       "PowerShell($env:Path = [Environment]::GetEnvironmentVariable\\('Path','Machine'\\) + ';' + [Environment]::GetEnvironmentVariable\\('Path','User'\\); & python -c \"from weasyprint import HTML; print\\('WeasyPrint OK'\\)\")",
-      "PowerShell($env:Path = [Environment]::GetEnvironmentVariable\\('Path','Machine'\\) + ';' + [Environment]::GetEnvironmentVariable\\('Path','User'\\); & 'C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe' -c \"from weasyprint import HTML; print\\('WeasyPrint OK'\\)\")"
+      "PowerShell($env:Path = [Environment]::GetEnvironmentVariable\\('Path','Machine'\\) + ';' + [Environment]::GetEnvironmentVariable\\('Path','User'\\); & 'C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe' -c \"from weasyprint import HTML; print\\('WeasyPrint OK'\\)\")",
+      "PowerShell(Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Temp\\\\fix-python-path.ps1')"
     ]
   }
 }
